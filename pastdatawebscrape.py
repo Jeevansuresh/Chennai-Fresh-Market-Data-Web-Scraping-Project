@@ -96,6 +96,7 @@ df["Wholesale Price"] = pd.to_numeric(df["Wholesale Price"], errors='coerce')
 unique_dates = sorted(df["Date"].unique())
 unique_vegetables = df["Vegetable"].unique()
 updates = 0
+batch_size = 500
 
 def calc_stats(df, vegetable, today):
     current = today - timedelta(days=1)
@@ -123,9 +124,14 @@ for veg in unique_vegetables:
             WHERE vegetable = %s AND date = %s
         """, (*stats, veg, dt))
         updates += 1
-        if updates % 500 == 0:
+
+        print(f"{veg} {dt.date()} Backfilled")
+
+        if updates % batch_size == 0:
             db.commit()
-db.commit()
+            print(f"🗃️ Committed batch of {updates} updates so far.")
+
+db.commit()  # Commit any remaining updates
 print(f"✅ Backfill complete. Total records updated: {updates}")
 
 cursor.close()
