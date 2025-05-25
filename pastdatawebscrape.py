@@ -1,8 +1,31 @@
 import requests
-import csv
 import mysql.connector
 from datetime import datetime, timedelta
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+
+# --- DB Config ---
+DB_CONFIG = {
+    "host": "localhost",
+    "user": "jagi",
+    "password": "Padjagi75$",
+    "database": "vegetables"
+}
+
+# Thread-local storage for DB connections to avoid conflicts between threads
+thread_local = threading.local()
+
+def get_db_connection():
+    if not hasattr(thread_local, "db"):
+        thread_local.db = mysql.connector.connect(**DB_CONFIG)
+        thread_local.cursor = thread_local.db.cursor()
+    return thread_local.db, thread_local.cursor
+
+def clean_price(value):
+    if isinstance(value, str):
+        return value.replace('₹', '').replace(',', '').strip()
+    return value
 
 def generate_date_range(start_date, end_date):
     current = start_date
@@ -10,93 +33,61 @@ def generate_date_range(start_date, end_date):
         yield current
         current += timedelta(days=1)
 
-def clean_price(value):
-    return value.replace('₹', '').replace(',', '').strip() if isinstance(value, str) else value
+def scrape_date_data(date_obj):
+    date_str = date_obj.strftime('%Y-%m-%d')
+    url = "https://vegetablemarketprice.com/api/dataapi/market/chennai/daywisedata"
+    params = {"date": date_str}
 
-# MySQL config
-db = mysql.connector.connect(
-    host="localhost",
-    user="jagi",
-    password="Padjagi75$",
-    database="vegetables"
-)
-cursor = db.cursor()
-
-# Create table if not exists
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS VEG_DATA (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    date DATE,
-    vegetable VARCHAR(255),
-    wholesale_price DECIMAL(10, 2),
-    retail_min DECIMAL(10, 2),
-    retail_max DECIMAL(10, 2),
-    mall_min DECIMAL(10, 2),
-    mall_max DECIMAL(10, 2),
-    units VARCHAR(50),
-    dma_30 DECIMAL(10, 2),
-    dma_90 DECIMAL(10, 2),
-    high_90 DECIMAL(10, 2),
-    low_90 DECIMAL(10, 2),
-    median_90 DECIMAL(10, 2),
-    dma_90_prev DECIMAL(10, 2)
-)
-""")
-db.commit()
-
-# Step 1: Scrape historical data and insert into DB
-start_date = datetime(2022, 1, 1)
-end_date = datetime.today() - timedelta(days=1)
-
-csv_file_path = "vegetable_prev_prices.csv"
-with open(csv_file_path, mode="w", newline="", encoding="utf-8") as csvfile:
-    writer = csv.writer(csvfile)
-    writer.writerow(["Date", "Vegetable", "Wholesale Price", "Retail Min", "Retail Max", "Mall Min", "Mall Max", "Units"])
-
-    for current_date in generate_date_range(start_date, end_date):
-        date_str = current_date.strftime('%Y-%m-%d')
-        response = requests.get("https://vegetablemarketprice.com/api/dataapi/market/chennai/daywisedata", params={"date": date_str})
-
+    try:
+        response = requests.get(url, params=params, timeout=10)
         if response.status_code != 200:
-            print(f"❌ {date_str}: Failed to fetch data.")
-            continue
+            print(f"❌ {date_str}: Failed to fetch data with status {response.status_code}")
+            return
 
-        try:
-            data = response.json()
-            for item in data.get('data', []):
-                vegetable = item.get("vegetablename", "").split(' (')[0].strip()
-                wholesale = clean_price(item.get("price", "0"))
-                retail_min, retail_max = (item.get("retailprice", "0 - 0") + " - 0").split(" - ")[:2]
-                mall_min, mall_max = (item.get("shopingmallprice", "0 - 0") + " - 0").split(" - ")[:2]
-                units = item.get("units", "")
+        data = response.json()
+        rows = []
+        for item in data.get('data', []):
+            vegetable = item.get("vegetablename", "").split(' (')[0].strip()
+            wholesale = clean_price(item.get("price", "0"))
+            retail_min, retail_max = (item.get("retailprice", "0 - 0") + " - 0").split(" - ")[:2]
+            mall_min, mall_max = (item.get("shopingmallprice", "0 - 0") + " - 0").split(" - ")[:2]
+            units = item.get("units", "")
 
-                row = [date_str, vegetable, wholesale, retail_min, retail_max, mall_min, mall_max, units]
-                writer.writerow(row)
+            rows.append((date_str, vegetable, wholesale, retail_min, retail_max, mall_min, mall_max, units))
 
-                # Insert into DB
-                cursor.execute("""
-                    INSERT INTO VEG_DATA (date, vegetable, wholesale_price, retail_min, retail_max, mall_min, mall_max, units)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, row)
-            db.commit()
-            print(f"✅ {date_str}: Inserted data.")
-        except Exception as e:
-            print(f"⚠️ {date_str}: Error - {e}")
-            db.rollback()
+        db, cursor = get_db_connection()
+        insert_query = """
+            INSERT INTO VEG_DATA (date, vegetable, wholesale_price, retail_min, retail_max, mall_min, mall_max, units)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.executemany(insert_query, rows)
+        db.commit()
+        print(f"✅ {date_str}: Inserted {len(rows)} rows")
+    except Exception as e:
+        print(f"⚠️ {date_str}: Exception occurred - {e}")
 
-# Step 2: Backfill stats in DB
-print("\n📊 Backfilling statistics...")
-cursor.execute("SELECT date, vegetable, wholesale_price FROM VEG_DATA")
-data = cursor.fetchall()
-
-df = pd.DataFrame(data, columns=["Date", "Vegetable", "Wholesale Price"])
-df["Date"] = pd.to_datetime(df["Date"])
-df["Wholesale Price"] = pd.to_numeric(df["Wholesale Price"], errors='coerce')
-
-unique_dates = sorted(df["Date"].unique())
-unique_vegetables = df["Vegetable"].unique()
-updates = 0
-batch_size = 500
+def create_table_if_not_exists():
+    db, cursor = get_db_connection()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS VEG_DATA (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        date DATE,
+        vegetable VARCHAR(255),
+        wholesale_price DECIMAL(10, 2),
+        retail_min DECIMAL(10, 2),
+        retail_max DECIMAL(10, 2),
+        mall_min DECIMAL(10, 2),
+        mall_max DECIMAL(10, 2),
+        units VARCHAR(50),
+        dma_30 DECIMAL(10, 2),
+        dma_90 DECIMAL(10, 2),
+        high_90 DECIMAL(10, 2),
+        low_90 DECIMAL(10, 2),
+        median_90 DECIMAL(10, 2),
+        dma_90_prev DECIMAL(10, 2)
+    )
+    """)
+    db.commit()
 
 def calc_stats(df, vegetable, today):
     current = today - timedelta(days=1)
@@ -115,25 +106,59 @@ def calc_stats(df, vegetable, today):
 
     return dma_30, dma_90, high_90, low_90, median_90, dma_90_prev
 
-for veg in unique_vegetables:
-    for dt in unique_dates:
-        stats = calc_stats(df, veg, dt)
-        cursor.execute("""
-            UPDATE VEG_DATA
-            SET dma_30 = %s, dma_90 = %s, high_90 = %s, low_90 = %s, median_90 = %s, dma_90_prev = %s
-            WHERE vegetable = %s AND date = %s
-        """, (*stats, veg, dt))
-        updates += 1
+def backfill_statistics():
+    print("\n📊 Starting backfill of statistics...")
 
-        print(f"{veg} {dt.date()} Backfilled")
+    db, cursor = get_db_connection()
+    cursor.execute("SELECT date, vegetable, wholesale_price FROM VEG_DATA")
+    data = cursor.fetchall()
 
-        if updates % batch_size == 0:
-            db.commit()
-            print(f"🗃️ Committed batch of {updates} updates so far.")
+    df = pd.DataFrame(data, columns=["Date", "Vegetable", "Wholesale Price"])
+    df["Date"] = pd.to_datetime(df["Date"])
+    df["Wholesale Price"] = pd.to_numeric(df["Wholesale Price"], errors='coerce')
 
-db.commit()  # Commit any remaining updates
-print(f"✅ Backfill complete. Total records updated: {updates}")
+    unique_dates = sorted(df["Date"].unique())
+    unique_vegetables = df["Vegetable"].unique()
 
-cursor.close()
-db.close()
-print("🔚 All historical operations completed.")
+    updates = 0
+    for veg in unique_vegetables:
+        for dt in unique_dates:
+            stats = calc_stats(df, veg, dt)
+            cursor.execute("""
+                UPDATE VEG_DATA
+                SET dma_30 = %s, dma_90 = %s, high_90 = %s, low_90 = %s, median_90 = %s, dma_90_prev = %s
+                WHERE vegetable = %s AND date = %s
+            """, (*stats, veg, dt))
+            updates += 1
+            print(f"{veg} {dt.date()} Backfilled")
+            if updates % 500 == 0:
+                db.commit()
+    db.commit()
+    print(f"\n✅ Backfill complete. Total records updated: {updates}")
+
+def main():
+    create_table_if_not_exists()
+
+    start_date = datetime(2022, 1, 1)
+    end_date = datetime.today() - timedelta(days=1)
+
+    print(f"🔄 Starting historical data scrape from {start_date.date()} to {end_date.date()} with multithreading...")
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(scrape_date_data, date) for date in generate_date_range(start_date, end_date)]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Thread exception: {e}")
+
+    backfill_statistics()
+
+    # Close DB connection for main thread
+    db, cursor = get_db_connection()
+    cursor.close()
+    db.close()
+    print("🔚 All operations completed successfully.")
+
+if __name__ == "__main__":
+    main()
