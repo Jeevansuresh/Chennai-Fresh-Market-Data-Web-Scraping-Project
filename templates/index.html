@@ -322,7 +322,7 @@
             labels: labels,
             datasets: [
               {
-                label: "Wholesale Price",
+                label: "Wholesale Price (₹/kg)",
                 data: wholesale,
                 borderColor: "#4a90e2",
                 backgroundColor: "rgba(74, 144, 226, 0.2)",
@@ -333,7 +333,7 @@
                 borderWidth: 3
               },
               {
-                label: "90 DMA",
+                label: "90 DMA (₹/kg)",
                 data: dma90,
                 borderColor: "#ff9f1a",
                 backgroundColor: "rgba(255,159,26,0.2)",
@@ -344,7 +344,7 @@
                 borderWidth: 3
               },
               {
-                label: "30 DMA",
+                label: "30 DMA (₹/kg)",
                 data: dma30,
                 borderColor: "#2ec4b6",
                 backgroundColor: "rgba(46,196,182,0.2)",
@@ -355,7 +355,7 @@
                 borderWidth: 3
               },
               {
-                label: "90 Median",
+                label: "90 Median (₹/kg)",
                 data: median90,
                 borderColor: "#e71d36",
                 backgroundColor: "rgba(231,29,54,0.2)",
@@ -405,63 +405,57 @@
                 intersect: false,
                 backgroundColor: body.classList.contains('light-mode') ? '#f0f4f8' : '#263238',
                 titleColor: body.classList.contains('light-mode') ? '#2c3e50' : '#eceff1',
-                bodyColor: body.classList.contains('light-mode') ? '#2c3e50' : '#cfd8dc',
-                cornerRadius: 6,
-                displayColors: true
+                bodyColor: body.classList.contains('light-mode') ? '#2c3e50' : '#eceff1',
+                borderColor: body.classList.contains('light-mode') ? '#b0bec5' : '#37474f',
+                borderWidth: 1,
+                caretSize: 6
               }
             },
             scales: {
               x: {
-                ticks: {
-                  maxRotation: 45,
-                  minRotation: 30,
+                display: true,
+                title: {
+                  display: true,
+                  text: "Date",
+                  color: body.classList.contains('light-mode') ? '#2c3e50' : '#cfd8dc',
                   font: {
-                    size: 12,
-                    family: "'Inter', 'Poppins', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-                    weight: '600',
-                    color: body.classList.contains('light-mode') ? '#536878' : '#90a4ae'
+                    size: 14,
+                    weight: '600'
                   }
                 },
-                grid: {
-                  display: false,
-                  color: body.classList.contains('light-mode') ? '#cfd8dc' : "#37474f"
+                ticks: {
+                  color: body.classList.contains('light-mode') ? '#4a5a6a' : '#a8b0c2',
+                  maxRotation: 45,
+                  minRotation: 45,
+                  maxTicksLimit: 10,
                 },
-                border: {
-                  color: body.classList.contains('light-mode') ? '#cfd8dc' : '#37474f'
+                grid: {
+                  color: body.classList.contains('light-mode') ? '#e1e8f0' : '#263238',
                 }
               },
               y: {
-                beginAtZero: true,
-                ticks: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Price (₹/kg)",
+                  color: body.classList.contains('light-mode') ? '#2c3e50' : '#cfd8dc',
                   font: {
-                    size: 12,
-                    family: "'Inter', 'Poppins', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-                    weight: '600',
-                    color: body.classList.contains('light-mode') ? '#536878' : '#90a4ae'
+                    size: 14,
+                    weight: '600'
                   }
                 },
-                grid: {
-                  color: body.classList.contains('light-mode') ? '#e1e8f0' : '#2c3e50'
+                ticks: {
+                  color: body.classList.contains('light-mode') ? '#4a5a6a' : '#a8b0c2',
+                  beginAtZero: true
                 },
-                border: {
-                  color: body.classList.contains('light-mode') ? '#cfd8dc' : '#37474f'
+                grid: {
+                  color: body.classList.contains('light-mode') ? '#e1e8f0' : '#263238',
                 }
               }
             },
             animation: {
-              duration: 800,
-              easing: 'easeInOutQuad'
-            },
-            hover: {
-              mode: 'nearest',
-              intersect: true,
-              onHover: (event, chartElements) => {
-                if(chartElements.length) {
-                  event.native.target.style.cursor = 'pointer';
-                } else {
-                  event.native.target.style.cursor = 'default';
-                }
-              }
+              duration: 900,
+              easing: 'easeOutQuart'
             }
           }
         });
@@ -470,16 +464,16 @@
       })
       .catch(err => {
         loadingSpinner.style.display = 'none';
-        startMessage.style.display = 'block';
-        canvas.style.display = 'none';
+        alert("Error fetching data: " + err.message);
         if(chart) {
           chart.destroy();
           chart = null;
         }
-        alert("Error fetching data. Please try again later.");
-        console.error(err);
+        canvas.style.display = 'none';
+        startMessage.style.display = 'block';
       });
   }
 </script>
+
 </body>
 </html>
