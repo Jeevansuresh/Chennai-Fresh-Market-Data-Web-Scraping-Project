@@ -97,7 +97,13 @@ CREATE TABLE IF NOT EXISTS VEG_DATA (
     retail_max DECIMAL(10, 2),
     mall_min DECIMAL(10, 2),
     mall_max DECIMAL(10, 2),
-    units VARCHAR(50)
+    units VARCHAR(50),
+    dma_30 DECIMAL(10, 2),
+    dma_90 DECIMAL(10, 2),
+    high_90 DECIMAL(10, 2),
+    low_90 DECIMAL(10, 2),
+    median_90 DECIMAL(10, 2),
+    dma_90_prev DECIMAL(10, 2)
 )
 """
 cursor.execute(create_table_query)
